@@ -2,31 +2,57 @@ const express = require('express')
 const app = express();
 const http = require('http')
 const fs = require('fs')
+const demofile = require('demofile')
+const path = require('path')
+const unbzip2 = require('unbzip2-stream');
 require('dotenv').config();
-
-var Steam = require('steam'),
-    steamClient = new Steam.SteamClient(),
-    steamUser = new Steam.SteamUser(steamClient),
-    steamGC = new Steam.SteamGameCoordinator(steamClient, 730),
-    csgo = require('csgo'),
-    CSGO = new csgo.CSGOClient(steamUser, steamGC, true);
+const Steam = require('steam')
+const steamClient = new Steam.SteamClient()
+const steamUser = new Steam.SteamUser(steamClient)
+const steamGC = new Steam.SteamGameCoordinator(steamClient, 730)
+const csgo = require('csgo')
+const CSGO = new csgo.CSGOClient(steamUser, steamGC, true);
+const demoFile = new demofile.DemoFile();
 
 const download = function (url, dest) {
     const file = fs.createWriteStream(dest);
-    http.get(url, function (response) {
-        response.pipe(file);
-        file.on('finish', function () {
+    http.get(url, resp => {
+        resp.pipe(file);
+        file.on('finish', () => {
             file.close();
-        })
+            console.log('Download finished');
+            unzip();
+        });
+    }).on('error', err => {
+        console.error(`Error downloading file: ${err.message}`);
+    });
+    ;
+}
+
+const unzip = function () {
+    const readStream = fs.createReadStream(__dirname + '/demos/test.bz2');
+    const writeStream = fs.createWriteStream(__dirname + '/demos/test.dem')
+    readStream.pipe(unbzip2()).pipe(writeStream).on('finish', () => {
+        console.log('extracted')
+        try {
+            demoFile.parseStream(fs.createReadStream(__dirname + '/demos/test.dem'));
+        } catch (e) {
+            console.log(e)
+        }
     })
 }
 
+demoFile.gameEvents.on("round_start", e => {
+    console.log(e)
+})
 
-const match = new csgo.SharecodeDecoder("CSGO-bsqib-odkHy-WbcMN-dACJi-ViZtH").decode();
-console.log(match);
+demoFile.gameEvents.on("player_footstep", e => {
 
+    if (e.player.name === 'Ante'){
 
-steamClient.connect(); // Connect to the Steam network
+        console.log(e.player.position);
+    }
+})
 
 steamClient.on('connected', () => {
     console.log('Connected to Steam network');
@@ -43,13 +69,18 @@ steamClient.on('logOnResponse', (logonResp) => {
     CSGO.launch();
 
     CSGO.on("ready", function () {
-        console.log('cs ready')
-        CSGO.requestGame('3609666415944007803', '3609669186197913934', 33211);
+        CSGO.requestGame(match.matchId, match.outcomeId, parseInt(match.tokenId));
     })
 
-    CSGO.on("matchList", function (list) {
+    CSGO.on("matchList", async function (list) {
+
+        // kom på ett sätt att skicka o spara path till demot bättre! :)
+
+
         const url = list.matches[0].roundstatsall[list.matches[0].roundstatsall.length - 1].map
-        download(url, __dirname + '/demos/test')
+        console.log(url)
+        await download(url, __dirname + '/demos/test.bz2');
+        const pathToFile = path.join(__dirname, '/demos/test.bz2');
     })
 
 
@@ -58,6 +89,11 @@ steamClient.on('logOnResponse', (logonResp) => {
 steamClient.on('error', (err) => {
     console.error('Error connecting to Steam:', err);
 });
+
+steamClient.connect(); // Connect to the Steam network
+
+const match = new csgo.SharecodeDecoder('CSGO-Dkuzq-7P42T-qh4qA-rSsXH-NcHLH').decode();
+
 
 
 app.get('/', (req, res) => {
